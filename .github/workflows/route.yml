@@ -1,0 +1,66 @@
+name: route
+
+# Heavy routing runs for the M3D routing challenge: one job per case,
+# all 20 in parallel on separate GitHub runners.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      budget:
+        description: 'seconds per case'
+        default: '600'
+      alpha:
+        description: 'attachment alpha'
+        default: '0.5'
+      tier:
+        description: 'intro (for now)'
+        default: 'intro'
+
+permissions:
+  contents: read
+
+env:
+  CHALLENGE: partcleda/eda-3d-routing-challenge
+
+jobs:
+  route:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        case: [case_01, case_02, case_03, case_04, case_05, case_06, case_07,
+               case_08, case_09, case_10, case_11, case_12, case_13, case_14,
+               case_15, case_16, case_17, case_18, case_19, case_20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: fetch challenge
+        run: git clone --depth 1 https://github.com/$CHALLENGE.git "$HOME/m3d"
+
+      - name: build router
+        run: bash build.sh
+
+      - name: route ${{ matrix.case }}
+        run: |
+          mkdir -p out
+          BUDGET=${{ github.event_name == 'workflow_dispatch' && inputs.budget || '300' }}
+          ALPHA=${{ github.event_name == 'workflow_dispatch' && inputs.alpha || '0.5' }}
+          ./m3droute "$HOME/m3d/benchmarks/${{ matrix.case }}.json" \
+            "out/${{ matrix.case }}.sol.json" "$BUDGET" 1 "$ALPHA" 2>&1 | tee route.log
+
+      - name: verify with official checker
+        run: |
+          cd "$HOME/m3d"
+          python3 -m m3d.cli evaluate --case "benchmarks/${{ matrix.case }}.json" \
+            --sol "$GITHUB_WORKSPACE/out/${{ matrix.case }}.sol.json"
+
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.case }}
+          path: |
+            out/${{ matrix.case }}.sol.json
+            route.log
